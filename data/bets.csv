@@ -1,0 +1,21 @@
+﻿date,time,sport,match,selection,tag,status,closing_odds,stake,odds,sportsbook
+2026-03-01,14:00,football,Arsenal vs Chelsea,Over 2.5,value,win,1.85,1,1.90,Pinnacle
+2026-03-01,16:30,football,Manchester United vs Liverpool,BTTS Yes,,loss,1.80,1,1.85,Bet365
+2026-03-02,18:00,football,Barcelona vs Sevilla,Barcelona win,pregame,win,1.65,2,1.70,Betano
+2026-03-02,20:00,basketball,Lakers vs Celtics,Lakers +5.5,live,void,1.95,1,1.91,Pinnacle
+2026-03-03,15:00,football,Inter vs Milan,Under 2.5,value,loss,1.90,1,1.95,Bet365
+2026-03-03,17:30,tennis,Djokovic vs Alcaraz,Djokovic win,,win,2.10,1,2.20,Pinnacle
+2026-03-04,19:00,football,PSG vs Lyon,Over 3.5,,loss,2.30,1,2.40,Betano
+2026-03-04,21:00,basketball,Bulls vs Heat,Heat ML,value,win,1.75,1,1.80,Bet365
+2026-03-05,14:30,football,Bayern vs Dortmund,BTTS Yes,,win,1.60,2,1.65,Pinnacle
+2026-03-05,16:00,football,Real Madrid vs Atletico,Real Madrid win,pregame,loss,1.85,1,1.90,Betano
+2026-03-06,18:00,tennis,Nadal vs Medvedev,Over 22.5 games,,void,1.95,1,1.90,Pinnacle
+2026-03-06,20:30,basketball,Warriors vs Suns,Warriors ML,value,win,1.70,1,1.75,Bet365
+2026-03-07,15:00,football,Juventus vs Napoli,Under 2.5,,loss,1.80,1,1.85,Betano
+2026-03-07,17:00,football,Tottenham vs Aston Villa,Over 2.5,value,win,1.95,1,2.00,Pinnacle
+2026-03-08,19:00,basketball,Nets vs Knicks,Knicks +3.5,,win,1.90,1,1.95,Bet365
+2026-03-08,21:30,football,Porto vs Benfica,BTTS Yes,pregame,loss,1.75,1,1.80,Betano
+2026-03-09,14:00,tennis,Sinner vs Zverev,Sinner win,value,win,1.85,1,1.90,Pinnacle
+2026-03-09,16:30,football,Ajax vs PSV,Over 3.5,,win,2.10,1,2.20,Bet365
+2026-03-10,18:00,basketball,Clippers vs Mavericks,Mavericks ML,,loss,1.80,1,1.85,Betano
+2026-03-10,20:00,football,Leverkusen vs Leipzig,Over 2.5,value,win,1.70,2,1.75,Pinnacle
