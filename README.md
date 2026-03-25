@@ -113,6 +113,7 @@ python load_bets.py
 ### 5. Run the dashboard
 
 ```
+before run the dashboard you have to change the "password" in the app.py file.
 streamlit run dashboard/app.py
 if this command doesn't work, try:
 python -m streamlit run dashboard/app.py
