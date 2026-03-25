@@ -114,6 +114,8 @@ python load_bets.py
 
 ```
 streamlit run dashboard/app.py
+if this comand doesn't work, try:
+python -m streamlit run dashboard/app.py
 ```
 
 ---
