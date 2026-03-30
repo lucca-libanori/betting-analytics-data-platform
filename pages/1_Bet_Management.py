@@ -9,7 +9,7 @@ DB_CONFIG = {
     "port": 5432,
     "dbname": "betting_analytics",
     "user": "postgres",
-    "password": "8017"
+    "password": "your_postgre_password"
 }
 
 
