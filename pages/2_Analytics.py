@@ -5,6 +5,10 @@ import plotly.express as px
 import plotly.graph_objects as go
 from sqlalchemy import create_engine
 import streamlit.components.v1 as components
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 bets_icon = """
 <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="none" stroke="#34d399" stroke-width="2">
@@ -45,13 +49,12 @@ hit_icon = """
 st.set_page_config(page_title="Analytics", layout="wide")
 
 DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "dbname": "betting_analytics",
-    "user": "postgres",
-    "password": "8017"
+    "host": os.getenv("DB_HOST"),
+    "port": os.getenv("DB_PORT"),
+    "dbname": os.getenv("DB_NAME"),
+    "user": os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD")
 }
-
 
 def get_engine():
     connection_string = (

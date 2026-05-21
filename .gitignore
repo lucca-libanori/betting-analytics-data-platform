@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .env
 .vscode/
+data/bets.csv
+run_app.bat
