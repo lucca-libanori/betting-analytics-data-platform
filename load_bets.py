@@ -3,7 +3,6 @@ import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import execute_batch
 
-
 DB_CONFIG = {
     "host": "localhost",
     "port": 5432,

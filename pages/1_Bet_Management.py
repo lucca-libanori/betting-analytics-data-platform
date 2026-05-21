@@ -1,0 +1,527 @@
+import streamlit as st
+import pandas as pd
+from sqlalchemy import create_engine, text
+
+st.set_page_config(page_title="Bet Management", layout="wide")
+
+DB_CONFIG = {
+    "host": "localhost",
+    "port": 5432,
+    "dbname": "betting_analytics",
+    "user": "postgres",
+    "password": "8017"
+}
+
+def get_engine():
+    connection_string = (
+        f"postgresql+psycopg2://{DB_CONFIG['user']}:{DB_CONFIG['password']}"
+        f"@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}"
+    )
+    return create_engine(connection_string)
+
+def show_feedback_message():
+    if "feedback_message" in st.session_state and "feedback_type" in st.session_state:
+        message = st.session_state.pop("feedback_message")
+        message_type = st.session_state.pop("feedback_type")
+
+        if message_type == "success":
+            st.success(message)
+        elif message_type == "warning":
+            st.warning(message)
+        elif message_type == "error":
+            st.error(message)
+        elif message_type == "info":
+            st.info(message)
+
+def set_feedback(message, message_type="success"):
+    st.session_state["feedback_message"] = message
+    st.session_state["feedback_type"] = message_type
+
+def load_bets(engine):
+    query = """
+    SELECT
+        bet_id,
+        date,
+        time,
+        sport,
+        match,
+        selection,
+        tag,
+        status,
+        stake,
+        odds,
+        sportsbook,
+        profit
+    FROM bets
+    ORDER BY date DESC, time DESC;
+    """
+    bets_df = pd.read_sql(query, engine)
+
+    bets_df["date"] = pd.to_datetime(bets_df["date"]).dt.date
+    bets_df["time"] = pd.to_datetime(
+        bets_df["time"].astype(str),
+        format="%H:%M:%S",
+        errors="coerce"
+    ).dt.time
+
+    bets_df["date_display"] = pd.to_datetime(bets_df["date"]).dt.strftime("%d/%m")
+    bets_df["time_display"] = pd.to_datetime(
+        bets_df["time"].astype(str),
+        format="%H:%M:%S",
+        errors="coerce"
+    ).dt.strftime("%H:%M")
+
+    return bets_df
+
+
+def calculate_profit(status, odds, stake):
+    if status == "win":
+        return round((odds - 1) * stake, 2)
+    elif status == "loss":
+        return round(-stake, 2)
+    elif status == "void":
+        return 0.0
+    elif status == "pending":
+        return None
+    return None
+
+
+def insert_bet(engine, bet_data):
+    query = text("""
+    INSERT INTO bets (
+        date, time, sport, match, selection,
+        tag, status, stake, odds, sportsbook, profit
+    )
+    VALUES (
+        :date, :time, :sport, :match, :selection,
+        :tag, :status, :stake, :odds, :sportsbook, :profit
+    )
+    """)
+
+    with engine.begin() as conn:
+        conn.execute(query, bet_data)
+
+def update_bet_status(engine, bet_id, new_status):
+    get_bet_query = text("""
+    SELECT odds, stake
+    FROM bets
+    WHERE bet_id = :bet_id
+    """)
+
+    update_query = text("""
+    UPDATE bets
+    SET status = :status,
+        profit = :profit
+    WHERE bet_id = :bet_id
+    """)
+
+    with engine.begin() as conn:
+        result = conn.execute(get_bet_query, {"bet_id": bet_id}).fetchone()
+
+        if result is None:
+            raise ValueError("Bet not found.")
+
+        odds = result[0]
+        stake = result[1]
+        profit = calculate_profit(new_status, odds, stake)
+
+        conn.execute(update_query, {
+            "status": new_status,
+            "profit": profit,
+            "bet_id": bet_id
+        })
+
+
+def update_bet(engine, bet_id, updated_data):
+    query = text("""
+        UPDATE bets
+        SET
+            date = :date,
+            time = :time,
+            match = :match,
+            selection = :selection,
+            tag = :tag,
+            stake = :stake,
+            odds = :odds,
+            sportsbook = :sportsbook,
+            status = :status,
+            profit = :profit
+        WHERE bet_id = :bet_id
+    """)
+
+    with engine.begin() as conn:
+        conn.execute(query, {**updated_data, "bet_id": bet_id})
+
+
+def delete_bet(engine, bet_id):
+    query = text("""
+        DELETE FROM bets
+        WHERE bet_id = :bet_id
+    """)
+
+    with engine.begin() as conn:
+        conn.execute(query, {"bet_id": bet_id})
+
+
+def main():
+
+    st.title("Bet Management")
+    show_feedback_message()
+
+    try:
+        engine = get_engine()
+        bets_df = load_bets(engine)
+
+        st.sidebar.header("Filters")
+
+        status_filter = st.sidebar.selectbox(
+            "Status",
+            ["All"] + sorted(bets_df["status"].dropna().unique().tolist())
+        )
+
+        sportsbook_filter = st.sidebar.selectbox(
+            "Sportsbook",
+            ["All"] + sorted(bets_df["sportsbook"].dropna().unique().tolist())
+        )
+
+        tag_filter = st.sidebar.selectbox(
+            "Tag",
+            ["All"] + sorted(bets_df["tag"].dropna().unique().tolist())
+        )
+
+        filtered_bets_df = bets_df.copy()
+
+        if status_filter != "All":
+            filtered_bets_df = filtered_bets_df[filtered_bets_df["status"] == status_filter]
+
+        if sportsbook_filter != "All":
+            filtered_bets_df = filtered_bets_df[filtered_bets_df["sportsbook"] == sportsbook_filter]
+
+        if tag_filter != "All":
+            filtered_bets_df = filtered_bets_df[filtered_bets_df["tag"] == tag_filter]
+
+        st.subheader("Add New Bet")
+
+        with st.form("bet_form"):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                date = st.date_input("Date")
+                time = st.time_input("Time")
+                st.text_input("Sport", value="Football", disabled=True)
+                sport = "Football"
+                match = st.text_input("Match")
+                selection = st.text_input("Selection")
+
+            with col2:
+                tag_options = sorted(bets_df["tag"].dropna().unique().tolist())
+                tag_choice = st.selectbox(
+                    "Tag (optional)",
+                    [""] + tag_options + ["Other"]
+                )
+
+                if tag_choice == "Other":
+                    tag_options = sorted(bets_df["tag"].dropna().unique().tolist())
+                    
+                    tag_choice = st.selectbox(
+                        "Tag",
+                        tag_options + ["Other"]
+                    )
+
+                    if tag_choice == "Other":
+                        tag = st.text_input("Enter new tag")
+                    else:
+                        tag = tag_choice
+                elif tag_choice == "":
+                    tag = ""
+                else:
+                    tag = tag_choice
+
+                status = st.selectbox(
+                    "Status",
+                    ["pending", "win", "loss", "void"],
+                    index=0
+                )
+                stake = st.number_input("Stake", min_value=0.0)
+                odds = st.number_input("Odds", min_value=1.01)
+
+                sportsbook_options = sorted(bets_df["sportsbook"].dropna().unique().tolist())
+                sportsbook_choice = st.selectbox(
+                    "Sportsbook",
+                    sportsbook_options + ["Other"]
+                )
+
+                if sportsbook_choice == "Other":
+                    sportsbook = st.text_input("Enter new sportsbook")
+                else:
+                    sportsbook = sportsbook_choice
+
+            submitted = st.form_submit_button("Save Bet")
+
+        if submitted:
+            try:
+                if not match.strip() or not selection.strip() or not sportsbook.strip():
+                    st.error("Please fill in all required fields.")
+                elif stake <= 0:
+                    st.error("Stake must be greater than 0.")
+                elif odds <= 1:
+                    st.error("Odds must be greater than 1.")
+                elif tag_choice == "Other" and not tag.strip():
+                    st.error("Please enter a tag.")
+                else:
+                    profit = calculate_profit(status, odds, stake)
+
+                    bet_data = {
+                        "date": date,
+                        "time": time,
+                        "sport": sport,
+                        "match": match.strip(),
+                        "selection": selection.strip(),
+                        "tag": tag.strip() if tag.strip() else None,
+                        "status": status,
+                        "stake": stake,
+                        "odds": odds,
+                        "sportsbook": sportsbook.strip(),
+                        "profit": profit,
+                    }
+
+                    insert_bet(engine, bet_data)
+                    set_feedback("Bet added successfully!", "success")
+                    st.rerun()
+
+            except Exception as e:
+                st.error(f"Error inserting bet: {e}")
+
+        management_display_df = bets_df[
+            ["date_display", "time_display", "match", "selection", "tag", "status", "stake", "odds", "sportsbook", "profit"]
+        ].rename(columns={
+            "date_display": "date",
+            "time_display": "time"
+        })
+
+        pending_df = bets_df[bets_df["status"] == "pending"]
+
+        pending_count = len(pending_df)
+        pending_units = pending_df["stake"].sum() if not pending_df.empty else 0.0
+
+        col1, col2 = st.columns(2)
+
+        col1.metric("Pending Bets", pending_count)
+        col2.metric("Pending Units", f"{pending_units:.2f} u")
+
+        st.subheader("All Bets")
+
+        bets_limit = st.selectbox(
+            "Number of bets to display",
+            options=[10, 25, 50, 100, 200],
+            index=1
+        )
+
+        display_bets_df = filtered_bets_df.head(bets_limit)
+
+        status_map = {
+            "Not settled": "pending",
+            "Won": "win",
+            "Lost": "loss",
+            "Void": "void",
+        }
+
+        reverse_status_map = {v: k for k, v in status_map.items()}
+
+        if not display_bets_df.empty:
+            for _, row in display_bets_df.iterrows():
+                with st.container(border=True):
+                    cols = st.columns([1.0, 1.0, 2.4, 2.0, 1.4, 1.4, 1.0, 1.0, 1.4, 1.0])
+
+                    cols[0].markdown(f"**Date**<br>{row['date_display']}", unsafe_allow_html=True)
+                    cols[1].markdown(f"**Time**<br>{row['time_display']}", unsafe_allow_html=True)
+                    cols[2].markdown(f"**Match**<br>{row['match']}", unsafe_allow_html=True)
+                    cols[3].markdown(f"**Selection**<br>{row['selection']}", unsafe_allow_html=True)
+                    cols[4].markdown(f"**Tag**<br>{row['tag'] if pd.notna(row['tag']) else '-'}", unsafe_allow_html=True)
+                    cols[5].markdown(f"**Sportsbook**<br>{row['sportsbook']}", unsafe_allow_html=True)
+                    cols[6].markdown(f"**Stake**<br>{row['stake']:.2f} u", unsafe_allow_html=True)
+                    cols[7].markdown(f"**Odds**<br>{row['odds']:.2f}", unsafe_allow_html=True)
+
+                    current_status_label = reverse_status_map.get(row["status"], "Not settled")
+
+                    selected_status_label = cols[8].selectbox(
+                        "Status",
+                        options=list(status_map.keys()),
+                        index=list(status_map.keys()).index(current_status_label),
+                        key=f"all_status_{row['bet_id']}",
+                        label_visibility="collapsed"
+                    )
+
+                    selected_status = status_map[selected_status_label]
+
+                    if selected_status != row["status"]:
+                        try:
+                            update_bet_status(engine, row["bet_id"], selected_status)
+                            set_feedback("Bet status updated successfully!", "success")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error updating bet: {e}")
+
+                    profit = row["profit"]
+
+                    if pd.isna(profit):
+                        cols[9].markdown("**Profit**<br><span style='color:gray'>Pending</span>", unsafe_allow_html=True)
+                    elif profit > 0:
+                        cols[9].markdown(
+                            f"**Profit**<br><span style='color:#22c55e'>{profit:.2f}</span>",
+                            unsafe_allow_html=True
+                        )
+                    elif profit < 0:
+                        cols[9].markdown(
+                            f"**Profit**<br><span style='color:#ef4444'>{profit:.2f}</span>",
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        cols[9].markdown(
+                            f"**Profit**<br><span style='color:#9ca3af'>{profit:.2f}</span>",
+                            unsafe_allow_html=True
+                        )
+        else:
+            st.info("No bets found.")
+
+        if not display_bets_df.empty:
+            st.subheader("Edit or Delete Bet")
+
+            bet_options = {
+                f"{row['bet_id']} | {row['match']} | {row['selection']}": row["bet_id"]
+                for _, row in bets_df.iterrows()
+            }
+
+            selected_label = st.selectbox(
+                "Select Bet",
+                list(bet_options.keys())
+            )
+
+            selected_bet_id = bet_options[selected_label]
+            selected_row = bets_df[bets_df["bet_id"] == selected_bet_id].iloc[0]
+
+            with st.form("edit_bet_form"):
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    edit_date = st.date_input("Date", value=selected_row["date"])
+                    edit_time = st.time_input("Time", value=selected_row["time"])
+                    edit_match = st.text_input("Match", value=selected_row["match"])
+                    edit_selection = st.text_input("Selection", value=selected_row["selection"])
+
+                    edit_tag_options = sorted(bets_df["tag"].dropna().unique().tolist())
+                    current_tag = selected_row["tag"] if pd.notna(selected_row["tag"]) else ""
+
+                    if current_tag and current_tag not in edit_tag_options:
+                        edit_tag_options.append(current_tag)
+                        edit_tag_options = sorted(edit_tag_options)
+
+                    edit_tag_select_options = [""] + edit_tag_options + ["Other"]
+
+                    if current_tag in edit_tag_options:
+                        default_tag_index = edit_tag_select_options.index(current_tag)
+                    elif current_tag == "":
+                        default_tag_index = 0
+                    else:
+                        default_tag_index = edit_tag_select_options.index("Other")
+
+                    edit_tag_choice = st.selectbox(
+                        "Tag",
+                        edit_tag_select_options,
+                        index=default_tag_index
+                    )
+
+                    if edit_tag_choice == "Other":
+                        edit_tag = st.text_input("Enter new tag", value=current_tag if current_tag not in edit_tag_options else "")
+                    elif edit_tag_choice == "":
+                        edit_tag = ""
+                    else:
+                        edit_tag = edit_tag_choice
+
+                with col2:
+                    edit_stake = st.number_input("Stake", min_value=0.0, value=float(selected_row["stake"]))
+                    edit_odds = st.number_input("Odds", min_value=1.01, value=float(selected_row["odds"]))
+
+                    edit_sportsbook_options = sorted(bets_df["sportsbook"].dropna().unique().tolist())
+                    current_sportsbook = selected_row["sportsbook"]
+
+                    if current_sportsbook and current_sportsbook not in edit_sportsbook_options:
+                        edit_sportsbook_options.append(current_sportsbook)
+                        edit_sportsbook_options = sorted(edit_sportsbook_options)
+
+                    edit_sportsbook_select_options = edit_sportsbook_options + ["Other"]
+
+                    if current_sportsbook in edit_sportsbook_options:
+                        default_sportsbook_index = edit_sportsbook_select_options.index(current_sportsbook)
+                    else:
+                        default_sportsbook_index = edit_sportsbook_select_options.index("Other")
+
+                    edit_sportsbook_choice = st.selectbox(
+                        "Sportsbook",
+                        edit_sportsbook_select_options,
+                        index=default_sportsbook_index
+                    )
+
+                    if edit_sportsbook_choice == "Other":
+                        edit_sportsbook = st.text_input("Enter new sportsbook", value=current_sportsbook)
+                    else:
+                        edit_sportsbook = edit_sportsbook_choice
+
+                    edit_status = st.selectbox(
+                        "Status",
+                        ["pending", "win", "loss", "void"],
+                        index=["pending", "win", "loss", "void"].index(selected_row["status"])
+                    )
+
+                submit_edit = st.form_submit_button("Update Bet")
+
+            if submit_edit:
+                try:
+                    if not edit_match.strip() or not edit_selection.strip() or not edit_sportsbook.strip():
+                        st.error("Please fill in all required fields.")
+                    elif edit_stake <= 0:
+                        st.error("Stake must be greater than 0.")
+                    elif edit_odds <= 1:
+                        st.error("Odds must be greater than 1.")
+                    else:
+                        profit = calculate_profit(edit_status, edit_odds, edit_stake)
+
+                        updated_data = {
+                            "date": edit_date,
+                            "time": edit_time,
+                            "match": edit_match.strip(),
+                            "selection": edit_selection.strip(),
+                            "tag": edit_tag.strip() if edit_tag.strip() else None,
+                            "stake": edit_stake,
+                            "odds": edit_odds,
+                            "sportsbook": edit_sportsbook.strip(),
+                            "status": edit_status,
+                            "profit": profit,
+                        }
+
+                        update_bet(engine, selected_bet_id, updated_data)
+                        set_feedback("Bet updated successfully!", "success")
+                        st.rerun()
+
+                except Exception as e:
+                    st.error(f"Error updating bet: {e}")
+
+            st.subheader("Delete Bet")
+            confirm_delete = st.checkbox("I confirm deletion")
+
+            if st.button("Delete Selected Bet"):
+                if not confirm_delete:
+                    st.warning("Please confirm deletion first.")
+                else:
+                    try:
+                        delete_bet(engine, selected_bet_id)
+                        set_feedback("Bet deleted successfully!", "warning")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error deleting bet: {e}")
+
+    except Exception as e:
+        st.error(f"Error loading page: {e}")
+
+if __name__ == "__main__":
+    main()
