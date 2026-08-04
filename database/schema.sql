@@ -16,6 +16,7 @@ CREATE TABLE bets (
     stake FLOAT NOT NULL CHECK (stake > 0),
     profit FLOAT,
     sportsbook VARCHAR(50) NOT NULL,
+    tipster VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
