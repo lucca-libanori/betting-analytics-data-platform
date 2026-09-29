@@ -45,6 +45,12 @@ hit_icon = """
   <circle cx="12" cy="12" r="4"/>
 </svg>
 """
+drawdown_icon = """
+<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="none" stroke="#ef4444" stroke-width="2">
+  <polyline points="4 6 9 12 13 9 18 16"/>
+  <polyline points="14 16 18 16 18 12"/>
+</svg>
+"""
 
 st.set_page_config(page_title="Analytics", layout="wide")
 
@@ -63,7 +69,6 @@ def get_engine():
     )
     return create_engine(connection_string)
 
-
 def load_bets(engine):
     query = """
     SELECT
@@ -73,11 +78,11 @@ def load_bets(engine):
         sport,
         match,
         selection,
-        tag,
         status,
         stake,
         odds,
         sportsbook,
+        tipster,
         profit
     FROM bets
     ORDER BY date DESC, time DESC;
@@ -86,22 +91,25 @@ def load_bets(engine):
     bets_df["date"] = pd.to_datetime(bets_df["date"]).dt.date
     return bets_df
 
-
 def apply_filters(bets_df):
     st.sidebar.header("Filters")
 
     sport_options = ["All"] + sorted(bets_df["sport"].dropna().unique().tolist())
     sportsbook_options = ["All"] + sorted(bets_df["sportsbook"].dropna().unique().tolist())
-    status_options = ["All"] + sorted(bets_df["status"].dropna().unique().tolist())
-    tag_options = ["All"] + sorted(bets_df["tag"].dropna().unique().tolist())
+    tipster_options = ["All"] + sorted(bets_df["tipster"].dropna().unique().tolist())
 
     min_date = bets_df["date"].min()
     max_date = bets_df["date"].max()
 
     sport_filter = st.sidebar.selectbox("Select Sport", sport_options)
     sportsbook_filter = st.sidebar.selectbox("Select Sportsbook", sportsbook_options)
-    status_filter = st.sidebar.selectbox("Select Status", status_options)
-    tag_filter = st.sidebar.selectbox("Select Tag", tag_options)
+    tipster_filter = st.sidebar.selectbox("Select Tipster", tipster_options)
+
+    odds_ranges_input = st.sidebar.text_input(
+        "Odds breakpoints (comma-separated)",
+        value="1.50, 2.50",
+        help="Ex: 1.50, 2.50 cria as faixas 1.01-1.50, 1.51-2.50 e 2.51+"
+    )
 
     start_date = st.sidebar.date_input("Start Date", min_date)
     end_date = st.sidebar.date_input("End Date", max_date)
@@ -114,11 +122,8 @@ def apply_filters(bets_df):
     if sportsbook_filter != "All":
         filtered_df = filtered_df[filtered_df["sportsbook"] == sportsbook_filter]
 
-    if status_filter != "All":
-        filtered_df = filtered_df[filtered_df["status"] == status_filter]
-
-    if tag_filter != "All":
-        filtered_df = filtered_df[filtered_df["tag"] == tag_filter]
+    if tipster_filter != "All":
+        filtered_df = filtered_df[filtered_df["tipster"] == tipster_filter]
 
     if start_date > end_date:
         st.sidebar.error("Start Date cannot be after End Date.")
@@ -129,8 +134,7 @@ def apply_filters(bets_df):
         (filtered_df["date"] <= end_date)
     ]
 
-    return filtered_df
-
+    return filtered_df, odds_ranges_input
 
 def calculate_kpis(filtered_df):
     total_bets = len(filtered_df)
@@ -154,12 +158,16 @@ def build_aggregations(filtered_df):
             "Sportsbook", "Bets", "Wins", "Hit Rate (%)",
             "Profit", "Stake", "ROI (%)", "Std Dev", "Sharpe"
         ])
-        tag_analysis = pd.DataFrame(columns=[
-            "Tag", "Bets", "Wins", "Hit Rate (%)",
+        tipster_analysis = pd.DataFrame(columns=[
+            "Tipster", "Bets", "Wins", "Hit Rate (%)",
+            "Profit", "Stake", "ROI (%)", "Std Dev", "Sharpe"
+        ])
+        sport_analysis = pd.DataFrame(columns=[
+            "Sport", "Bets", "Wins", "Hit Rate (%)",
             "Profit", "Stake", "ROI (%)", "Std Dev", "Sharpe"
         ])
         bankroll_df = pd.DataFrame(columns=["date", "profit", "cumulative_profit"])
-        return sportsbook_analysis, tag_analysis, bankroll_df
+        return sportsbook_analysis, tipster_analysis, sport_analysis, bankroll_df
 
     sportsbook_analysis = (
         settled_df.groupby("sportsbook", as_index=False)
@@ -198,9 +206,9 @@ def build_aggregations(filtered_df):
         ]
     ].sort_values(by="Profit", ascending=False)
 
-    tag_analysis = (
-        settled_df.dropna(subset=["tag"])
-        .groupby("tag", as_index=False)
+    tipster_analysis = (
+        settled_df.dropna(subset=["tipster"])
+        .groupby("tipster", as_index=False)
         .agg(
             Bets=("bet_id", "count"),
             Wins=("status", lambda x: (x == "win").sum()),
@@ -210,28 +218,66 @@ def build_aggregations(filtered_df):
         )
     )
 
-    tag_analysis["Std_Dev"] = tag_analysis["Std_Dev"].fillna(0)
+    tipster_analysis["Std_Dev"] = tipster_analysis["Std_Dev"].fillna(0)
 
-    tag_analysis["Hit Rate (%)"] = (
-        (tag_analysis["Wins"] / tag_analysis["Bets"]) * 100
+    tipster_analysis["Hit Rate (%)"] = (
+        (tipster_analysis["Wins"] / tipster_analysis["Bets"]) * 100
     ).round(2)
 
-    tag_analysis["ROI (%)"] = (
-        (tag_analysis["Profit"] / tag_analysis["Stake"]) * 100
+    tipster_analysis["ROI (%)"] = (
+        (tipster_analysis["Profit"] / tipster_analysis["Stake"]) * 100
     ).replace([np.inf, -np.inf], 0).fillna(0).round(2)
 
-    tag_analysis["Sharpe"] = (
-        tag_analysis["Profit"] / tag_analysis["Std_Dev"]
+    tipster_analysis["Sharpe"] = (
+        tipster_analysis["Profit"] / tipster_analysis["Std_Dev"]
     ).replace([np.inf, -np.inf], 0).fillna(0).round(2)
 
-    tag_analysis = tag_analysis.rename(columns={
-        "tag": "Tag",
+    tipster_analysis = tipster_analysis.rename(columns={
+        "tipster": "Tipster",
         "Std_Dev": "Std Dev"
     })
 
-    tag_analysis = tag_analysis[
+    tipster_analysis = tipster_analysis[
         [
-            "Tag", "Bets", "Wins", "Hit Rate (%)",
+            "Tipster", "Bets", "Wins", "Hit Rate (%)",
+            "Profit", "Stake", "ROI (%)", "Std Dev", "Sharpe"
+        ]
+    ].sort_values(by="Profit", ascending=False)
+
+    sport_analysis = (
+        settled_df.dropna(subset=["sport"])
+        .groupby("sport", as_index=False)
+        .agg(
+            Bets=("bet_id", "count"),
+            Wins=("status", lambda x: (x == "win").sum()),
+            Profit=("profit", "sum"),
+            Stake=("stake", "sum"),
+            Std_Dev=("profit", "std"),
+        )
+    )
+
+    sport_analysis["Std_Dev"] = sport_analysis["Std_Dev"].fillna(0)
+
+    sport_analysis["Hit Rate (%)"] = (
+        (sport_analysis["Wins"] / sport_analysis["Bets"]) * 100
+    ).round(2)
+
+    sport_analysis["ROI (%)"] = (
+        (sport_analysis["Profit"] / sport_analysis["Stake"]) * 100
+    ).replace([np.inf, -np.inf], 0).fillna(0).round(2)
+
+    sport_analysis["Sharpe"] = (
+        sport_analysis["Profit"] / sport_analysis["Std_Dev"]
+    ).replace([np.inf, -np.inf], 0).fillna(0).round(2)
+
+    sport_analysis = sport_analysis.rename(columns={
+        "sport": "Sport",
+        "Std_Dev": "Std Dev"
+    })
+
+    sport_analysis = sport_analysis[
+        [
+            "Sport", "Bets", "Wins", "Hit Rate (%)",
             "Profit", "Stake", "ROI (%)", "Std Dev", "Sharpe"
         ]
     ].sort_values(by="Profit", ascending=False)
@@ -243,42 +289,36 @@ def build_aggregations(filtered_df):
     )
     bankroll_df["cumulative_profit"] = bankroll_df["profit"].cumsum()
 
-    return sportsbook_analysis, tag_analysis, bankroll_df
+    return sportsbook_analysis, tipster_analysis, sport_analysis, bankroll_df
 
+def calculate_drawdown(bankroll_df):
+    if bankroll_df.empty:
+        return 0.0, 0, True, pd.DataFrame(columns=["date", "drawdown"])
 
-def plot_risk_analysis(df, label_col, title):
-    if df.empty:
-        return None
+    df = bankroll_df.copy()
+    df["running_max"] = df["cumulative_profit"].cummax()
+    df["drawdown"] = df["cumulative_profit"] - df["running_max"]
 
-    risk_df = df.copy()
+    idx_max_dd = df["drawdown"].idxmin()
+    max_drawdown = df.loc[idx_max_dd, "drawdown"]
+    peak_value = df.loc[idx_max_dd, "running_max"]
 
-    fig = px.scatter(
-        risk_df,
-        x="Std Dev",
-        y="ROI (%)",
-        size="Bets",
-        color="Profit",
-        hover_name=label_col,
-        text=label_col,
-        title=title,
-        color_continuous_scale="RdYlGn",
-    )
+    peak_matches = df[df["cumulative_profit"] == peak_value]
+    peak_date = peak_matches["date"].iloc[0] if not peak_matches.empty else df.loc[idx_max_dd, "date"]
 
-    fig.update_traces(textposition="top center")
+    after_peak = df.loc[idx_max_dd:]
+    recovered = after_peak[after_peak["cumulative_profit"] >= peak_value]
 
-    fig.add_hline(y=0, line_width=1, line_color="gray")
+    if not recovered.empty:
+        recovery_date = recovered["date"].iloc[0]
+        is_recovered = True
+    else:
+        recovery_date = df["date"].iloc[-1]
+        is_recovered = False
 
-    fig.update_layout(
-        height=500,
-        plot_bgcolor="#0e1117",
-        paper_bgcolor="#0e1117",
-        font=dict(color="white"),
-        xaxis_title="Volatility (Std Dev)",
-        yaxis_title="ROI (%)",
-        margin=dict(l=20, r=20, t=50, b=20),
-    )
+    duration_days = (pd.to_datetime(recovery_date) - pd.to_datetime(peak_date)).days
 
-    return fig
+    return round(max_drawdown, 2), duration_days, is_recovered, df[["date", "drawdown"]]
 
 def plot_multi_line_chart(df, category_col, title):
     if df.empty:
@@ -292,63 +332,217 @@ def plot_multi_line_chart(df, category_col, title):
 
     grouped["cumulative_profit"] = grouped.groupby(category_col)["profit"].cumsum()
 
+    # Adiciona um ponto inicial em 0 para cada categoria, um dia antes da primeira aposta dela
+    zero_rows = []
+    for category, group in grouped.groupby(category_col):
+        first_date = pd.to_datetime(group["date"].iloc[0])
+        zero_rows.append({
+            "date": (first_date - pd.Timedelta(days=1)).date(),
+            category_col: category,
+            "profit": 0,
+            "cumulative_profit": 0
+        })
+
+    grouped = pd.concat([pd.DataFrame(zero_rows), grouped], ignore_index=True)
+    grouped = grouped.sort_values(["date", category_col])
+
+    premium_palette = [
+        "#22c55e", "#60a5fa", "#f59e0b", "#a78bfa",
+        "#ef4444", "#2dd4bf", "#f472b6", "#eab308",
+        "#818cf8", "#fb923c"
+    ]
+
     fig = px.line(
         grouped,
         x="date",
         y="cumulative_profit",
         color=category_col,
-        title=title,
-        markers=True
+        markers=True,
+        color_discrete_sequence=premium_palette,
     )
+
+    fig.update_traces(
+        line=dict(width=3, shape="spline", smoothing=0.4),
+        marker=dict(size=5, line=dict(color="#0e1117", width=1)),
+        hovertemplate="<b>%{fullData.name}</b><br>%{x|%d/%m}: %{y:.2f} u<extra></extra>",
+    )
+
+    fig.add_hline(y=0, line_width=1, line_color="rgba(255,255,255,0.25)")
 
     fig.update_layout(
         height=400,
         plot_bgcolor="#0e1117",
         paper_bgcolor="#0e1117",
-        font=dict(color="white"),
-        xaxis_title="Date",
-        yaxis_title="Profit",
-        legend_title=category_col,
-        margin=dict(l=20, r=20, t=50, b=20),
+        font=dict(color="white", family="Arial, sans-serif"),
+        title=None,
+        xaxis=dict(
+            title=None,
+            showgrid=False,
+            zeroline=False,
+            showline=False,
+        ),
+        yaxis=dict(
+            title="Profit (u)",
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.06)",
+            zeroline=False,
+            showline=False,
+        ),
+        legend=dict(
+            title=None,
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="left",
+            x=0,
+            font=dict(size=11)
+        ),
+        margin=dict(l=20, r=20, t=30, b=20),
+        hovermode="x unified",
+        hoverlabel=dict(
+            bgcolor="#1f2937",
+            font_size=12,
+            font_color="white",
+            bordercolor="rgba(255,255,255,0.1)"
+        ),
     )
 
     return fig
-
 
 def plot_bankroll_chart(bankroll_df):
     if bankroll_df.empty:
         return None
 
+    is_positive = bankroll_df["cumulative_profit"].iloc[-1] >= 0
+    line_color = "#22c55e" if is_positive else "#ef4444"
+    fill_color = "rgba(34, 197, 94, 0.18)" if is_positive else "rgba(239, 68, 68, 0.18)"
+
+    # Adiciona um ponto inicial em 0, um dia antes da primeira aposta
+    first_date = bankroll_df["date"].iloc[0]
+    start_date = pd.to_datetime(first_date) - pd.Timedelta(days=1)
+
+    plot_df = pd.concat([
+        pd.DataFrame([{
+            "date": start_date.date(),
+            "profit": 0,
+            "cumulative_profit": 0
+        }]),
+        bankroll_df
+    ], ignore_index=True)
+
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(
-        x=bankroll_df["date"],
-        y=bankroll_df["cumulative_profit"],
-        mode="lines+markers",
+        x=plot_df["date"],
+        y=plot_df["cumulative_profit"],
+        mode="lines",
         name="Cumulative Profit",
-        line=dict(color="#22c55e", width=3)
+        line=dict(color=line_color, width=3.5, shape="spline", smoothing=0.4),
+        fill="tozeroy",
+        fillcolor=fill_color,
+        hovertemplate="<b>%{x|%d/%m}</b><br>Cumulative: %{y:.2f} u<extra></extra>",
     ))
 
     fig.add_trace(go.Scatter(
-        x=bankroll_df["date"],
-        y=bankroll_df["profit"],
-        mode="lines+markers",
-        name="Daily Profit",
-        line=dict(color="#60a5fa", width=2, dash="dot")
+        x=plot_df["date"],
+        y=plot_df["cumulative_profit"],
+        mode="markers",
+        marker=dict(
+            color=line_color,
+            size=6,
+            line=dict(color="#0e1117", width=1.5)
+        ),
+        showlegend=False,
+        hoverinfo="skip",
     ))
 
-    fig.add_hline(y=0, line_width=1, line_color="gray")
+    fig.add_trace(go.Scatter(
+        x=plot_df["date"],
+        y=plot_df["profit"],
+        mode="lines+markers",
+        name="Daily Profit",
+        line=dict(color="#60a5fa", width=1.8, dash="dot"),
+        marker=dict(color="#60a5fa", size=4),
+        hovertemplate="<b>%{x|%d/%m}</b><br>Daily: %{y:.2f} u<extra></extra>",
+    ))
+
+    fig.add_hline(y=0, line_width=1, line_color="rgba(255,255,255,0.25)")
 
     fig.update_layout(
         height=450,
         plot_bgcolor="#0e1117",
         paper_bgcolor="#0e1117",
-        font=dict(color="white"),
-        xaxis_title="Date",
-        yaxis_title="Profit",
-        legend=dict(title=""),
+        font=dict(color="white", family="Arial, sans-serif"),
+        xaxis=dict(
+            title=None,
+            showgrid=False,
+            zeroline=False,
+            showline=False,
+        ),
+        yaxis=dict(
+            title="Profit (u)",
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.06)",
+            zeroline=False,
+            showline=False,
+        ),
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            font=dict(size=12)
+        ),
         margin=dict(l=20, r=20, t=40, b=20),
-        hovermode="x unified"
+        hovermode="x unified",
+        hoverlabel=dict(
+            bgcolor="#1f2937",
+            font_size=13,
+            font_color="white",
+            bordercolor="rgba(255,255,255,0.1)"
+        ),
+    )
+
+    return fig
+
+def plot_drawdown_chart(drawdown_df):
+    if drawdown_df.empty:
+        return None
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=drawdown_df["date"],
+        y=drawdown_df["drawdown"],
+        mode="lines",
+        name="Drawdown",
+        line=dict(color="#ef4444", width=3, shape="spline", smoothing=0.4),
+        fill="tozeroy",
+        fillcolor="rgba(239, 68, 68, 0.18)",
+        hovertemplate="<b>%{x|%d/%m}</b><br>Drawdown: %{y:.2f} u<extra></extra>",
+    ))
+
+    fig.add_hline(y=0, line_width=1, line_color="rgba(255,255,255,0.25)")
+
+    fig.update_layout(
+        height=350,
+        plot_bgcolor="#0e1117",
+        paper_bgcolor="#0e1117",
+        font=dict(color="white", family="Arial, sans-serif"),
+        xaxis=dict(title=None, showgrid=False, zeroline=False, showline=False),
+        yaxis=dict(
+            title="Drawdown (u)",
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.06)",
+            zeroline=False,
+            showline=False,
+        ),
+        showlegend=False,
+        margin=dict(l=20, r=20, t=20, b=20),
+        hovermode="x unified",
+        hoverlabel=dict(bgcolor="#1f2937", font_size=13, font_color="white", bordercolor="rgba(255,255,255,0.1)"),
     )
 
     return fig
@@ -491,6 +685,61 @@ def build_total_risk_analysis(filtered_df):
         "Sharpe": sharpe
     }])
 
+def build_odds_range_analysis(filtered_df, bins):
+    settled_df = filtered_df[filtered_df["status"].isin(["win", "loss", "void"])].copy()
+
+    if settled_df.empty or len(bins) < 2:
+        return pd.DataFrame(columns=[
+            "Odds Range", "Bets", "Wins", "Hit Rate (%)",
+            "Profit", "Stake", "ROI (%)", "Std Dev", "Sharpe"
+        ])
+
+    labels = [
+        f"{bins[i]:.2f} - {bins[i+1]:.2f}" if bins[i+1] != float("inf") else f"{bins[i]:.2f}+"
+        for i in range(len(bins) - 1)
+    ]
+
+    settled_df["odds_range"] = pd.cut(settled_df["odds"], bins=bins, labels=labels)
+
+    odds_analysis = (
+        settled_df.groupby("odds_range", as_index=False, observed=True)
+        .agg(
+            Bets=("bet_id", "count"),
+            Wins=("status", lambda x: (x == "win").sum()),
+            Profit=("profit", "sum"),
+            Stake=("stake", "sum"),
+            Std_Dev=("profit", "std"),
+        )
+    )
+
+    odds_analysis["Std_Dev"] = odds_analysis["Std_Dev"].fillna(0)
+
+    odds_analysis["Hit Rate (%)"] = (
+        (odds_analysis["Wins"] / odds_analysis["Bets"]) * 100
+    ).round(2)
+
+    odds_analysis["ROI (%)"] = (
+        (odds_analysis["Profit"] / odds_analysis["Stake"]) * 100
+    ).replace([np.inf, -np.inf], 0).fillna(0).round(2)
+
+    odds_analysis["Sharpe"] = (
+        odds_analysis["Profit"] / odds_analysis["Std_Dev"]
+    ).replace([np.inf, -np.inf], 0).fillna(0).round(2)
+
+    odds_analysis = odds_analysis.rename(columns={
+        "odds_range": "Odds Range",
+        "Std_Dev": "Std Dev"
+    })
+
+    odds_analysis = odds_analysis[
+        [
+            "Odds Range", "Bets", "Wins", "Hit Rate (%)",
+            "Profit", "Stake", "ROI (%)", "Std Dev", "Sharpe"
+        ]
+    ]
+
+    return odds_analysis
+
 def plot_total_risk_line_chart(filtered_df):
     settled_df = filtered_df[
         filtered_df["status"].isin(["win", "loss", "void"])
@@ -509,14 +758,12 @@ def plot_total_risk_line_chart(filtered_df):
         )
     )
 
-    # ROI diário
     daily_df["daily_roi"] = np.where(
         daily_df["stake"] > 0,
         (daily_df["profit"] / daily_df["stake"]) * 100,
         0
     )
 
-    # ROI acumulado
     daily_df["cumulative_profit"] = daily_df["profit"].cumsum()
     daily_df["cumulative_stake"] = daily_df["stake"].cumsum()
 
@@ -526,7 +773,6 @@ def plot_total_risk_line_chart(filtered_df):
         0
     )
 
-    # Volatilidade rolling
     daily_df["rolling_std"] = (
         daily_df["profit"]
         .rolling(window=7, min_periods=1)
@@ -534,67 +780,121 @@ def plot_total_risk_line_chart(filtered_df):
         .fillna(0)
     )
 
+    # Ponto inicial em zero, um dia antes da primeira aposta
+    first_date = pd.to_datetime(daily_df["date"].iloc[0])
+    start_row = pd.DataFrame([{
+        "date": (first_date - pd.Timedelta(days=1)).date(),
+        "cumulative_roi": 0,
+        "rolling_std": daily_df["rolling_std"].iloc[0]
+    }])
+
+    plot_df = pd.concat([start_row, daily_df], ignore_index=True)
+
+    is_positive = daily_df["cumulative_roi"].iloc[-1] >= 0
+    line_color = "#22c55e" if is_positive else "#ef4444"
+    fill_color = "rgba(34, 197, 94, 0.18)" if is_positive else "rgba(239, 68, 68, 0.18)"
+
     fig = go.Figure()
 
-    # ROI
     fig.add_trace(go.Scatter(
-        x=daily_df["date"],
-        y=daily_df["cumulative_roi"],
+        x=plot_df["date"],
+        y=plot_df["cumulative_roi"],
         mode="lines",
         name="Cumulative ROI (%)",
-        line=dict(color="#22c55e", width=3)
+        line=dict(color=line_color, width=3.5, shape="spline", smoothing=0.4),
+        fill="tozeroy",
+        fillcolor=fill_color,
+        hovertemplate="<b>%{x|%d/%m}</b><br>ROI: %{y:.2f}%<extra></extra>",
     ))
 
-    # Volatilidade
     fig.add_trace(go.Scatter(
-        x=daily_df["date"],
-        y=daily_df["rolling_std"],
+        x=plot_df["date"],
+        y=plot_df["cumulative_roi"],
+        mode="markers",
+        marker=dict(
+            color=line_color,
+            size=6,
+            line=dict(color="#0e1117", width=1.5)
+        ),
+        showlegend=False,
+        hoverinfo="skip",
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=plot_df["date"],
+        y=plot_df["rolling_std"],
         mode="lines",
         name="Rolling Volatility",
-        line=dict(color="#ef4444", width=2, dash="dot")
+        line=dict(color="#ff0404", width=1.8, dash="dot"),
+        hovertemplate="<b>%{x|%d/%m}</b><br>Volatility: %{y:.2f}<extra></extra>",
     ))
 
+    fig.add_hline(y=0, line_width=1, line_color="rgba(255,255,255,0.25)")
+
     fig.update_layout(
-        height=500,
+        height=450,
         plot_bgcolor="#0e1117",
         paper_bgcolor="#0e1117",
-        font=dict(color="white"),
-        xaxis_title="Date",
-        yaxis_title="Value",
-        legend=dict(title=""),
+        font=dict(color="white", family="Arial, sans-serif"),
+        xaxis=dict(
+            title=None,
+            showgrid=False,
+            zeroline=False,
+            showline=False,
+        ),
+        yaxis=dict(
+            title="Value",
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.06)",
+            zeroline=False,
+            showline=False,
+        ),
+        legend=dict(
+            title=None,
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            font=dict(size=12)
+        ),
         margin=dict(l=20, r=20, t=40, b=20),
-        hovermode="x unified"
+        hovermode="x unified",
+        hoverlabel=dict(
+            bgcolor="#1f2937",
+            font_size=13,
+            font_color="white",
+            bordercolor="rgba(255,255,255,0.1)"
+        ),
     )
 
     return fig
 
-def plot_tag_risk_line_chart(filtered_df, selected_tag):
-    tag_df = filtered_df[
-        (filtered_df["tag"] == selected_tag) &
+def plot_tipster_risk_line_chart(filtered_df, selected_tipster):
+    tipster_df = filtered_df[
+        (filtered_df["tipster"] == selected_tipster) &
         (filtered_df["status"].isin(["win", "loss", "void"]))
     ].copy()
 
-    if tag_df.empty:
+    if tipster_df.empty:
         return None
 
-    tag_df = tag_df.sort_values(by=["date", "time"])
+    tipster_df = tipster_df.sort_values(by=["date", "time"])
 
     daily_df = (
-        tag_df.groupby("date", as_index=False)
+        tipster_df.groupby("date", as_index=False)
         .agg(
             profit=("profit", "sum"),
             stake=("stake", "sum")
         )
     )
 
-    # ROI diário
     daily_df["daily_roi"] = np.where(
         daily_df["stake"] > 0,
         (daily_df["profit"] / daily_df["stake"]) * 100,
         0
     )
 
-    # ROI acumulado
     daily_df["cumulative_profit"] = daily_df["profit"].cumsum()
     daily_df["cumulative_stake"] = daily_df["stake"].cumsum()
 
@@ -604,7 +904,6 @@ def plot_tag_risk_line_chart(filtered_df, selected_tag):
         0
     )
 
-    # Volatilidade rolling
     daily_df["rolling_std"] = (
         daily_df["profit"]
         .rolling(window=7, min_periods=1)
@@ -614,7 +913,6 @@ def plot_tag_risk_line_chart(filtered_df, selected_tag):
 
     fig = go.Figure()
 
-    # ROI
     fig.add_trace(go.Scatter(
         x=daily_df["date"],
         y=daily_df["cumulative_roi"],
@@ -623,7 +921,6 @@ def plot_tag_risk_line_chart(filtered_df, selected_tag):
         line=dict(color="#22c55e", width=3)
     ))
 
-    # Volatilidade
     fig.add_trace(go.Scatter(
         x=daily_df["date"],
         y=daily_df["rolling_std"],
@@ -644,7 +941,7 @@ def plot_tag_risk_line_chart(filtered_df, selected_tag):
         legend=dict(title=""),
         margin=dict(l=20, r=20, t=40, b=20),
         hovermode="x unified",
-        title=f"Risk Analysis - {selected_tag}"
+        title=f"Risk Analysis - {selected_tipster}"
     )
 
     return fig
@@ -656,17 +953,19 @@ def main():
         engine = get_engine()
         bets_df = load_bets(engine)
 
-        filtered_df = apply_filters(bets_df)
+        filtered_df, odds_ranges_input = apply_filters(bets_df)
 
         total_bets, total_profit, total_stake, roi_percent, hit_rate_percent = calculate_kpis(filtered_df)
 
         (
             sportsbook_analysis,
-            tag_analysis,
+            tipster_analysis,
+            sport_analysis,
             bankroll_df,
         ) = build_aggregations(filtered_df)
 
         total_risk_analysis = build_total_risk_analysis(filtered_df)
+        max_drawdown, dd_duration, dd_recovered, drawdown_df = calculate_drawdown(bankroll_df)
 
         profit_color = "#22c55e" if total_profit > 0 else "#ef4444" if total_profit < 0 else "#9ca3af"
         roi_color = "#22c55e" if roi_percent > 0 else "#ef4444" if roi_percent < 0 else "#9ca3af"
@@ -689,6 +988,19 @@ def main():
         with kpi_col5:
             render_kpi_card("Hit Rate (%)", f"{hit_rate_percent:.2f}%", hit_icon, hit_rate_color)
 
+
+        st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
+
+        kpi_col6, kpi_col7 = st.columns(2, gap="large")
+
+        with kpi_col6:
+            render_kpi_card("Max Drawdown", f"{max_drawdown:.2f} u", drawdown_icon, "#ef4444")
+
+        with kpi_col7:
+            duration_label = f"{dd_duration}d" if dd_recovered else f"{dd_duration}d (ongoing)"
+            duration_color = "#22c55e" if dd_recovered else "#f59e0b"
+            render_kpi_card("Drawdown Duration", duration_label, drawdown_icon, duration_color)
+
         st.markdown("<div style='margin-bottom: 18px;'></div>", unsafe_allow_html=True)
 
         chart_col1, chart_col2 = st.columns(2)
@@ -706,14 +1018,14 @@ def main():
                 st.info("No data available.")
 
         with chart_col2:
-            st.subheader("Profit Over Time by Tag")
+            st.subheader("Profit Over Time by Tipster")
             if not filtered_df.empty:
-                fig_tag = plot_multi_line_chart(
+                fig_tipster = plot_multi_line_chart(
                     filtered_df,
-                    "tag",
-                    "Profit Over Time by Tag"
+                    "tipster",
+                    "Profit Over Time by Tipster"
                 )
-                st.plotly_chart(fig_tag, use_container_width=True)
+                st.plotly_chart(fig_tipster, use_container_width=True)
             else:
                 st.info("No data available.")
 
@@ -725,53 +1037,20 @@ def main():
         else:
             st.info("No settled data available for the selected filters.")
 
-        st.subheader("Risk Analysis")
-
-        risk_col1, risk_col2 = st.columns(2)
-
-        with risk_col1:
-            st.subheader("Total Risk vs Return")
-            if not total_risk_analysis.empty:
-                fig_risk_total = plot_total_risk_line_chart(filtered_df)
-                st.plotly_chart(fig_risk_total, use_container_width=True)
-            else:
-                st.info("No total risk data available.")
-
-        with risk_col2:
-            st.subheader("Tag Risk vs Return")
-            if not tag_analysis.empty:
-                fig_risk_tag = plot_risk_analysis(
-                    tag_analysis,
-                    "Tag",
-                    "Risk vs Return by Tag"
-                )
-                st.plotly_chart(fig_risk_tag, use_container_width=True)
-            else:
-                st.info("No tag data available.")
-
-        st.subheader("Tag Risk Analysis")
-
-        available_tags = sorted(
-            filtered_df["tag"]
-            .dropna()
-            .unique()
-            .tolist()
-        )
-
-        selected_tag_risk = st.selectbox(
-            "Select Tag",
-            available_tags
-        )
-
-        fig_tag_risk = plot_tag_risk_line_chart(
-            filtered_df,
-            selected_tag_risk
-        )
-
-        if fig_tag_risk:
-            st.plotly_chart(fig_tag_risk, use_container_width=True)
+        st.subheader("Total Risk vs Return")
+        if not total_risk_analysis.empty:
+            fig_risk_total = plot_total_risk_line_chart(filtered_df)
+            st.plotly_chart(fig_risk_total, use_container_width=True)
         else:
-            st.info("No data available for selected tag.")
+            st.info("No total risk data available.")
+
+        st.subheader("Drawdown")
+
+        if not drawdown_df.empty:
+            fig_drawdown = plot_drawdown_chart(drawdown_df)
+            st.plotly_chart(fig_drawdown, use_container_width=True)
+        else:
+            st.info("No drawdown data available.")
 
         st.subheader("Analysis Overview")
 
@@ -780,8 +1059,28 @@ def main():
 
         st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
 
-        st.subheader("Tag Analysis")
-        render_analysis_rows(tag_analysis, "Tag")
+        st.subheader("Tipster Analysis")
+        render_analysis_rows(tipster_analysis, "Tipster")
+
+        st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+
+        st.subheader("Sport Analysis")
+        render_analysis_rows(sport_analysis, "Sport")
+
+        st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+        st.subheader("Odds Range Analysis")
+
+        try:
+            breakpoints = sorted(set(
+                float(x.strip()) for x in odds_ranges_input.split(",") if x.strip()
+            ))
+            bins = [1.0] + breakpoints + [float("inf")]
+
+            odds_analysis = build_odds_range_analysis(filtered_df, bins)
+            render_analysis_rows(odds_analysis, "Odds Range")
+
+        except ValueError:
+            st.error("Formato inválido. Use números separados por vírgula, ex: 1.50, 2.50")
 
     except Exception as e:
         st.error(f"Error loading analytics page: {e}")

@@ -3,6 +3,7 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 import os
 from dotenv import load_dotenv
+import time
 
 load_dotenv()
 
@@ -28,14 +29,20 @@ def show_feedback_message():
         message = st.session_state.pop("feedback_message")
         message_type = st.session_state.pop("feedback_type")
 
-        if message_type == "success":
-            st.success(message)
-        elif message_type == "warning":
-            st.warning(message)
-        elif message_type == "error":
-            st.error(message)
-        elif message_type == "info":
-            st.info(message)
+        placeholder = st.empty()
+
+        with placeholder.container():
+            if message_type == "success":
+                st.success(message)
+            elif message_type == "warning":
+                st.warning(message)
+            elif message_type == "error":
+                st.error(message)
+            elif message_type == "info":
+                st.info(message)
+
+        time.sleep(2.5)
+        placeholder.empty()
 
 def set_feedback(message, message_type="success"):
     st.session_state["feedback_message"] = message
@@ -50,11 +57,11 @@ def load_bets(engine):
         sport,
         match,
         selection,
-        tag,
         status,
         stake,
         odds,
         sportsbook,
+        tipster,
         profit
     FROM bets
     ORDER BY date DESC, time DESC;
@@ -94,11 +101,11 @@ def insert_bet(engine, bet_data):
     query = text("""
     INSERT INTO bets (
         date, time, sport, match, selection,
-        tag, status, stake, odds, sportsbook, profit
+         status, stake, odds, sportsbook, tipster, profit
     )
     VALUES (
         :date, :time, :sport, :match, :selection,
-        :tag, :status, :stake, :odds, :sportsbook, :profit
+         :status, :stake, :odds, :sportsbook, :tipster, :profit
     )
     """)
 
@@ -142,12 +149,13 @@ def update_bet(engine, bet_id, updated_data):
         SET
             date = :date,
             time = :time,
+            sport = :sport,
             match = :match,
             selection = :selection,
-            tag = :tag,
             stake = :stake,
             odds = :odds,
             sportsbook = :sportsbook,
+            tipster = :tipster,
             status = :status,
             profit = :profit
         WHERE bet_id = :bet_id
@@ -188,11 +196,6 @@ def main():
             ["All"] + sorted(bets_df["sportsbook"].dropna().unique().tolist())
         )
 
-        tag_filter = st.sidebar.selectbox(
-            "Tag",
-            ["All"] + sorted(bets_df["tag"].dropna().unique().tolist())
-        )
-
         filtered_bets_df = bets_df.copy()
 
         if status_filter != "All":
@@ -200,9 +203,6 @@ def main():
 
         if sportsbook_filter != "All":
             filtered_bets_df = filtered_bets_df[filtered_bets_df["sportsbook"] == sportsbook_filter]
-
-        if tag_filter != "All":
-            filtered_bets_df = filtered_bets_df[filtered_bets_df["tag"] == tag_filter]
 
         st.subheader("Add New Bet")
 
@@ -212,34 +212,36 @@ def main():
             with col1:
                 date = st.date_input("Date")
                 time = st.time_input("Time")
-                st.text_input("Sport", value="Football", disabled=True)
-                sport = "Football"
+                base_sport_options = ["Football", "Basketball", "Tennis", "Volleyball", "MMA", "eSports"]
+                db_sport_options = bets_df["sport"].dropna().unique().tolist()
+                sport_options = sorted(set(base_sport_options) | set(db_sport_options)) + ["Other"]
+
+                sport_choice = st.selectbox(
+                    "Sport",
+                    sport_options
+                )
+
+                if sport_choice == "Other":
+                    sport = st.text_input("Enter new sport")
+                else:
+                    sport = sport_choice
                 match = st.text_input("Match")
                 selection = st.text_input("Selection")
 
             with col2:
-                tag_options = sorted(bets_df["tag"].dropna().unique().tolist())
-                tag_choice = st.selectbox(
-                    "Tag (optional)",
-                    [""] + tag_options + ["Other"]
+
+                tipster_options = sorted(bets_df["tipster"].dropna().unique().tolist())
+                tipster_choice = st.selectbox(
+                    "Tipster (optional)",
+                    [""] + tipster_options + ["Other"]
                 )
 
-                if tag_choice == "Other":
-                    tag_options = sorted(bets_df["tag"].dropna().unique().tolist())
-                    
-                    tag_choice = st.selectbox(
-                        "Tag",
-                        tag_options + ["Other"]
-                    )
-
-                    if tag_choice == "Other":
-                        tag = st.text_input("Enter new tag")
-                    else:
-                        tag = tag_choice
-                elif tag_choice == "":
-                    tag = ""
+                if tipster_choice == "Other":
+                    tipster = st.text_input("Enter new tipster")
+                elif tipster_choice == "":
+                    tipster = ""
                 else:
-                    tag = tag_choice
+                    tipster = tipster_choice
 
                 status = st.selectbox(
                     "Status",
@@ -264,14 +266,14 @@ def main():
 
         if submitted:
             try:
-                if not match.strip() or not selection.strip() or not sportsbook.strip():
+                if not match.strip() or not selection.strip() or not sportsbook.strip() or not sport.strip():
                     st.error("Please fill in all required fields.")
                 elif stake <= 0:
                     st.error("Stake must be greater than 0.")
                 elif odds <= 1:
                     st.error("Odds must be greater than 1.")
-                elif tag_choice == "Other" and not tag.strip():
-                    st.error("Please enter a tag.")
+                elif tipster_choice == "Other" and not tipster.strip():
+                    st.error("Please enter a tipster.")
                 else:
                     profit = calculate_profit(status, odds, stake)
 
@@ -281,11 +283,11 @@ def main():
                         "sport": sport,
                         "match": match.strip(),
                         "selection": selection.strip(),
-                        "tag": tag.strip() if tag.strip() else None,
                         "status": status,
                         "stake": stake,
                         "odds": odds,
                         "sportsbook": sportsbook.strip(),
+                        "tipster": tipster.strip() if tipster.strip() else None,
                         "profit": profit,
                     }
 
@@ -297,7 +299,7 @@ def main():
                 st.error(f"Error inserting bet: {e}")
 
         management_display_df = bets_df[
-            ["date_display", "time_display", "match", "selection", "tag", "status", "stake", "odds", "sportsbook", "profit"]
+            ["date_display", "time_display", "match", "selection", "status", "stake", "odds", "sportsbook", "profit"]
         ].rename(columns={
             "date_display": "date",
             "time_display": "time"
@@ -318,10 +320,13 @@ def main():
         bets_limit = st.selectbox(
             "Number of bets to display",
             options=[10, 25, 50, 100, 200],
-            index=1
+            index=2
         )
 
-        display_bets_df = filtered_bets_df.head(bets_limit)
+        if status_filter == "pending":
+            display_bets_df = filtered_bets_df
+        else:
+            display_bets_df = filtered_bets_df.head(bets_limit)
 
         status_map = {
             "Not settled": "pending",
@@ -335,20 +340,21 @@ def main():
         if not display_bets_df.empty:
             for _, row in display_bets_df.iterrows():
                 with st.container(border=True):
-                    cols = st.columns([1.0, 1.0, 2.4, 2.0, 1.4, 1.4, 1.0, 1.0, 1.4, 1.0])
+                    cols = st.columns([1.0, 1.0, 1.2, 2.2, 1.8, 1.2, 1.2, 0.9, 0.9, 1.3, 1.0])
 
                     cols[0].markdown(f"**Date**<br>{row['date_display']}", unsafe_allow_html=True)
                     cols[1].markdown(f"**Time**<br>{row['time_display']}", unsafe_allow_html=True)
-                    cols[2].markdown(f"**Match**<br>{row['match']}", unsafe_allow_html=True)
-                    cols[3].markdown(f"**Selection**<br>{row['selection']}", unsafe_allow_html=True)
-                    cols[4].markdown(f"**Tag**<br>{row['tag'] if pd.notna(row['tag']) else '-'}", unsafe_allow_html=True)
+                    cols[2].markdown(f"**Sport**<br>{row['sport']}", unsafe_allow_html=True)
+                    cols[3].markdown(f"**Match**<br>{row['match']}", unsafe_allow_html=True)
+                    cols[4].markdown(f"**Selection**<br>{row['selection']}", unsafe_allow_html=True)
                     cols[5].markdown(f"**Sportsbook**<br>{row['sportsbook']}", unsafe_allow_html=True)
-                    cols[6].markdown(f"**Stake**<br>{row['stake']:.2f} u", unsafe_allow_html=True)
-                    cols[7].markdown(f"**Odds**<br>{row['odds']:.2f}", unsafe_allow_html=True)
+                    cols[6].markdown(f"**Tipster**<br>{row['tipster'] if pd.notna(row['tipster']) else '-'}", unsafe_allow_html=True)
+                    cols[7].markdown(f"**Stake**<br>{row['stake']:.2f} u", unsafe_allow_html=True)
+                    cols[8].markdown(f"**Odds**<br>{row['odds']:.2f}", unsafe_allow_html=True)
 
                     current_status_label = reverse_status_map.get(row["status"], "Not settled")
 
-                    selected_status_label = cols[8].selectbox(
+                    selected_status_label = cols[9].selectbox(
                         "Status",
                         options=list(status_map.keys()),
                         index=list(status_map.keys()).index(current_status_label),
@@ -369,19 +375,19 @@ def main():
                     profit = row["profit"]
 
                     if pd.isna(profit):
-                        cols[9].markdown("**Profit**<br><span style='color:gray'>Pending</span>", unsafe_allow_html=True)
+                        cols[10].markdown("**Profit**<br><span style='color:gray'>Pending</span>", unsafe_allow_html=True)
                     elif profit > 0:
-                        cols[9].markdown(
+                        cols[10].markdown(
                             f"**Profit**<br><span style='color:#22c55e'>{profit:.2f}</span>",
                             unsafe_allow_html=True
                         )
                     elif profit < 0:
-                        cols[9].markdown(
+                        cols[10].markdown(
                             f"**Profit**<br><span style='color:#ef4444'>{profit:.2f}</span>",
                             unsafe_allow_html=True
                         )
                     else:
-                        cols[9].markdown(
+                        cols[10].markdown(
                             f"**Profit**<br><span style='color:#9ca3af'>{profit:.2f}</span>",
                             unsafe_allow_html=True
                         )
@@ -410,41 +416,63 @@ def main():
                 with col1:
                     edit_date = st.date_input("Date", value=selected_row["date"])
                     edit_time = st.time_input("Time", value=selected_row["time"])
-                    edit_match = st.text_input("Match", value=selected_row["match"])
-                    edit_selection = st.text_input("Selection", value=selected_row["selection"])
 
-                    edit_tag_options = sorted(bets_df["tag"].dropna().unique().tolist())
-                    current_tag = selected_row["tag"] if pd.notna(selected_row["tag"]) else ""
+                    base_sport_options = ["Football", "Basketball", "Tennis", "Volleyball", "MMA", "eSports"]
+                    db_sport_options = bets_df["sport"].dropna().unique().tolist()
+                    edit_sport_options = sorted(set(base_sport_options) | set(db_sport_options)) + ["Other"]
+                    current_sport = selected_row["sport"]
 
-                    if current_tag and current_tag not in edit_tag_options:
-                        edit_tag_options.append(current_tag)
-                        edit_tag_options = sorted(edit_tag_options)
-
-                    edit_tag_select_options = [""] + edit_tag_options + ["Other"]
-
-                    if current_tag in edit_tag_options:
-                        default_tag_index = edit_tag_select_options.index(current_tag)
-                    elif current_tag == "":
-                        default_tag_index = 0
+                    if current_sport in edit_sport_options:
+                        default_sport_index = edit_sport_options.index(current_sport)
                     else:
-                        default_tag_index = edit_tag_select_options.index("Other")
+                        default_sport_index = edit_sport_options.index("Other")
 
-                    edit_tag_choice = st.selectbox(
-                        "Tag",
-                        edit_tag_select_options,
-                        index=default_tag_index
+                    edit_sport_choice = st.selectbox(
+                        "Sport",
+                        edit_sport_options,
+                        index=default_sport_index
                     )
 
-                    if edit_tag_choice == "Other":
-                        edit_tag = st.text_input("Enter new tag", value=current_tag if current_tag not in edit_tag_options else "")
-                    elif edit_tag_choice == "":
-                        edit_tag = ""
+                    if edit_sport_choice == "Other":
+                        edit_sport = st.text_input("Enter new sport", value=current_sport if current_sport not in edit_sport_options else "")
                     else:
-                        edit_tag = edit_tag_choice
+                        edit_sport = edit_sport_choice
+
+                    edit_match = st.text_input("Match", value=selected_row["match"])
+                    edit_selection = st.text_input("Selection", value=selected_row["selection"])
 
                 with col2:
                     edit_stake = st.number_input("Stake", min_value=0.0, value=float(selected_row["stake"]))
                     edit_odds = st.number_input("Odds", min_value=1.01, value=float(selected_row["odds"]))
+
+                    edit_tipster_options = sorted(bets_df["tipster"].dropna().unique().tolist())
+                    current_tipster = selected_row["tipster"] if pd.notna(selected_row["tipster"]) else ""
+
+                    if current_tipster and current_tipster not in edit_tipster_options:
+                        edit_tipster_options.append(current_tipster)
+                        edit_tipster_options = sorted(edit_tipster_options)
+
+                    edit_tipster_select_options = [""] + edit_tipster_options + ["Other"]
+
+                    if current_tipster in edit_tipster_options:
+                        default_tipster_index = edit_tipster_select_options.index(current_tipster)
+                    elif current_tipster == "":
+                        default_tipster_index = 0
+                    else:
+                        default_tipster_index = edit_tipster_select_options.index("Other")
+
+                    edit_tipster_choice = st.selectbox(
+                        "Tipster",
+                        edit_tipster_select_options,
+                        index=default_tipster_index
+                    )
+
+                    if edit_tipster_choice == "Other":
+                        edit_tipster = st.text_input("Enter new tipster", value=current_tipster if current_tipster not in edit_tipster_options else "")
+                    elif edit_tipster_choice == "":
+                        edit_tipster = ""
+                    else:
+                        edit_tipster = edit_tipster_choice
 
                     edit_sportsbook_options = sorted(bets_df["sportsbook"].dropna().unique().tolist())
                     current_sportsbook = selected_row["sportsbook"]
@@ -481,7 +509,7 @@ def main():
 
             if submit_edit:
                 try:
-                    if not edit_match.strip() or not edit_selection.strip() or not edit_sportsbook.strip():
+                    if not edit_match.strip() or not edit_selection.strip() or not edit_sportsbook.strip() or not edit_sport.strip():
                         st.error("Please fill in all required fields.")
                     elif edit_stake <= 0:
                         st.error("Stake must be greater than 0.")
@@ -493,12 +521,13 @@ def main():
                         updated_data = {
                             "date": edit_date,
                             "time": edit_time,
+                            "sport": edit_sport.strip(),
                             "match": edit_match.strip(),
                             "selection": edit_selection.strip(),
-                            "tag": edit_tag.strip() if edit_tag.strip() else None,
                             "stake": edit_stake,
                             "odds": edit_odds,
                             "sportsbook": edit_sportsbook.strip(),
+                            "tipster": edit_tipster.strip() if edit_tipster.strip() else None,
                             "status": edit_status,
                             "profit": profit,
                         }

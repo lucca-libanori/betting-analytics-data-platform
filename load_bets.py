@@ -30,8 +30,8 @@ REQUIRED_COLUMNS = [
 ]
 
 OPTIONAL_COLUMNS = [
-    "tag",
-    "closing_odds"
+    "closing_odds",
+    "tipster"
 ]
 
 ALLOWED_STATUS = {"win", "loss", "void"}
@@ -61,7 +61,6 @@ def validate_and_clean(df: pd.DataFrame) -> pd.DataFrame:
         "sport",
         "match",
         "selection",
-        "tag",
         "status",
         "sportsbook"
     ]
@@ -122,14 +121,14 @@ def insert_data(df: pd.DataFrame) -> None:
             sport,
             match,
             selection,
-            tag,
             status,
             closing_odds,
             stake,
             odds,
-            sportsbook
+            sportsbook,
+            tipster
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
 
     rows = [
@@ -139,16 +138,15 @@ def insert_data(df: pd.DataFrame) -> None:
             row["sport"],
             row["match"],
             row["selection"],
-            row["tag"],
             row["status"],
             row["closing_odds"],
             row["stake"],
             row["odds"],
             row["sportsbook"],
+            row["tipster"],
         )
         for _, row in df.iterrows()
     ]
-
     conn = None
     try:
         conn = psycopg2.connect(**DB_CONFIG)

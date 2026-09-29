@@ -9,7 +9,6 @@ CREATE TABLE bets (
     sport VARCHAR(50) NOT NULL,
     match VARCHAR(100) NOT NULL,
     selection VARCHAR(100) NOT NULL,
-    tag VARCHAR(50),
     status VARCHAR(10) NOT NULL CHECK (status IN ('win', 'loss', 'void', 'pending')),
     closing_odds FLOAT,
     odds FLOAT NOT NULL CHECK (odds > 1),
