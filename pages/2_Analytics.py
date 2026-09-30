@@ -40,9 +40,10 @@ roi_icon = """
 """
 
 hit_icon = """
-<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="none" stroke="#f59e0b" stroke-width="2">
-  <circle cx="12" cy="12" r="10"/>
-  <circle cx="12" cy="12" r="4"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <line x1="19" y1="5" x2="5" y2="19"/>
+  <circle cx="6.5" cy="6.5" r="2.5"/>
+  <circle cx="17.5" cy="17.5" r="2.5"/>
 </svg>
 """
 drawdown_icon = """
@@ -155,15 +156,15 @@ def build_aggregations(filtered_df):
 
     if settled_df.empty:
         sportsbook_analysis = pd.DataFrame(columns=[
-            "Sportsbook", "Bets", "Wins", "Hit Rate (%)",
+            "Sportsbook", "Bets", "Wins", "Hit Rate",
             "Profit", "Stake", "ROI (%)", "Std Dev", "Sharpe"
         ])
         tipster_analysis = pd.DataFrame(columns=[
-            "Tipster", "Bets", "Wins", "Hit Rate (%)",
+            "Tipster", "Bets", "Wins", "Hit Rate",
             "Profit", "Stake", "ROI (%)", "Std Dev", "Sharpe"
         ])
         sport_analysis = pd.DataFrame(columns=[
-            "Sport", "Bets", "Wins", "Hit Rate (%)",
+            "Sport", "Bets", "Wins", "Hit Rate",
             "Profit", "Stake", "ROI (%)", "Std Dev", "Sharpe"
         ])
         bankroll_df = pd.DataFrame(columns=["date", "profit", "cumulative_profit"])
@@ -182,7 +183,7 @@ def build_aggregations(filtered_df):
 
     sportsbook_analysis["Std_Dev"] = sportsbook_analysis["Std_Dev"].fillna(0)
 
-    sportsbook_analysis["Hit Rate (%)"] = (
+    sportsbook_analysis["Hit Rate"] = (
         (sportsbook_analysis["Wins"] / sportsbook_analysis["Bets"]) * 100
     ).round(2)
 
@@ -201,7 +202,7 @@ def build_aggregations(filtered_df):
 
     sportsbook_analysis = sportsbook_analysis[
         [
-            "Sportsbook", "Bets", "Wins", "Hit Rate (%)",
+            "Sportsbook", "Bets", "Wins", "Hit Rate",
             "Profit", "Stake", "ROI (%)", "Std Dev", "Sharpe"
         ]
     ].sort_values(by="Profit", ascending=False)
@@ -220,7 +221,7 @@ def build_aggregations(filtered_df):
 
     tipster_analysis["Std_Dev"] = tipster_analysis["Std_Dev"].fillna(0)
 
-    tipster_analysis["Hit Rate (%)"] = (
+    tipster_analysis["Hit Rate"] = (
         (tipster_analysis["Wins"] / tipster_analysis["Bets"]) * 100
     ).round(2)
 
@@ -239,7 +240,7 @@ def build_aggregations(filtered_df):
 
     tipster_analysis = tipster_analysis[
         [
-            "Tipster", "Bets", "Wins", "Hit Rate (%)",
+            "Tipster", "Bets", "Wins", "Hit Rate",
             "Profit", "Stake", "ROI (%)", "Std Dev", "Sharpe"
         ]
     ].sort_values(by="Profit", ascending=False)
@@ -258,7 +259,7 @@ def build_aggregations(filtered_df):
 
     sport_analysis["Std_Dev"] = sport_analysis["Std_Dev"].fillna(0)
 
-    sport_analysis["Hit Rate (%)"] = (
+    sport_analysis["Hit Rate"] = (
         (sport_analysis["Wins"] / sport_analysis["Bets"]) * 100
     ).round(2)
 
@@ -277,7 +278,7 @@ def build_aggregations(filtered_df):
 
     sport_analysis = sport_analysis[
         [
-            "Sport", "Bets", "Wins", "Hit Rate (%)",
+            "Sport", "Bets", "Wins", "Hit Rate",
             "Profit", "Stake", "ROI (%)", "Std Dev", "Sharpe"
         ]
     ].sort_values(by="Profit", ascending=False)
@@ -548,6 +549,7 @@ def plot_drawdown_chart(drawdown_df):
     return fig
 
 def render_kpi_card(title, value, icon_svg, color="white"):
+    icon_svg = icon_svg.replace("<svg", '<svg style="display:block;"', 1)
     html = f"""
     <div style="
         display:flex;
@@ -565,8 +567,9 @@ def render_kpi_card(title, value, icon_svg, color="white"):
             align-items:center;
             justify-content:center;
             flex-shrink:0;
+            overflow:hidden;
         ">
-            {icon_svg}
+            <div style="display:flex;">{icon_svg}</div>
         </div>
 
         <div>
@@ -624,7 +627,7 @@ def render_analysis_rows(df, title_col):
 
         bets = int(row["Bets"])
         wins = int(row["Wins"])
-        hit_rate = row["Hit Rate (%)"]
+        hit_rate = row["Hit Rate"]
         stake = row["Stake"]
         profit = row["Profit"]
         roi = row["ROI (%)"]
@@ -690,7 +693,7 @@ def build_odds_range_analysis(filtered_df, bins):
 
     if settled_df.empty or len(bins) < 2:
         return pd.DataFrame(columns=[
-            "Odds Range", "Bets", "Wins", "Hit Rate (%)",
+            "Odds Range", "Bets", "Wins", "Hit Rate",
             "Profit", "Stake", "ROI (%)", "Std Dev", "Sharpe"
         ])
 
@@ -714,7 +717,7 @@ def build_odds_range_analysis(filtered_df, bins):
 
     odds_analysis["Std_Dev"] = odds_analysis["Std_Dev"].fillna(0)
 
-    odds_analysis["Hit Rate (%)"] = (
+    odds_analysis["Hit Rate"] = (
         (odds_analysis["Wins"] / odds_analysis["Bets"]) * 100
     ).round(2)
 
@@ -733,7 +736,7 @@ def build_odds_range_analysis(filtered_df, bins):
 
     odds_analysis = odds_analysis[
         [
-            "Odds Range", "Bets", "Wins", "Hit Rate (%)",
+            "Odds Range", "Bets", "Wins", "Hit Rate",
             "Profit", "Stake", "ROI (%)", "Std Dev", "Sharpe"
         ]
     ]
@@ -986,7 +989,7 @@ def main():
             render_kpi_card("ROI (%)", f"{roi_percent:.2f}%", roi_icon, roi_color)
 
         with kpi_col5:
-            render_kpi_card("Hit Rate (%)", f"{hit_rate_percent:.2f}%", hit_icon, hit_rate_color)
+            render_kpi_card("Hit Rate", f"{hit_rate_percent:.2f}%", hit_icon, hit_rate_color)
 
 
         st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)

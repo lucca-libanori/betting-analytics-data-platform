@@ -1,12 +1,14 @@
-# Betting Analytics Data Platform
+# Performance Analytics Data Platform
 
 ## Overview
 
-This project is a data analytics platform designed to track, process, and analyze sports investment performance. It simulates a real-world data pipeline, transforming raw betting data into meaningful insights through a structured workflow.
+This project is a data analytics platform designed to track, process, and analyze the performance of recurring decisions with quantifiable, measurable outcomes, built and demonstrated around sports betting for my case, but adaptable to any domain where you place capital repeatedly and need to track results over time: trading, poker, prediction markets, or any personal investment strategy.
 
-The system allows users to evaluate their betting performance using key metrics such as profit, ROI, and hit rate, as well as interactive filtering and visualization.
+It simulates a real-world data pipeline, transforming raw entries into structured insights through an ETL process, a relational database, and an interactive dashboard.
 
-You can adapt this platform for any kind of investment with just a few changes.
+The system evaluates performance using key metrics such as profit, ROI, hit rate, drawdown, and risk-adjusted return (Sharpe), with interactive filtering and visualization built for exploration, not just reporting.
+
+**Adapting it to another domain** (e.g., trades instead of bets) mainly means renaming a handful of fields — the pipeline, database design, and analytics layer stay the same.
 
 ---
 
@@ -16,13 +18,14 @@ You can adapt this platform for any kind of investment with just a few changes.
 * **PostgreSQL**
 * **SQL**
 * **Streamlit**
+* **Plotly** (interactive visualizations)
 * **CSV (data ingestion)**
 
 ---
 
 ## Features
 
-* Data ingestion from CSV files
+* Data ingestion from CSV files, with validation and cleaning
 * Automated ETL pipeline using Python
 * Structured relational database (PostgreSQL)
 
@@ -32,29 +35,29 @@ You can adapt this platform for any kind of investment with just a few changes.
   * ROI (%)
   * Hit Rate (%)
   * Total Stake
+  * Max Drawdown & Drawdown Duration
 
 * Interactive dashboard with filters:
 
-  * Sport
-  * Sportsbook
-  * Status
-  * Tag
+  * Sport / Category
+  * Sportsbook / Source
   * Date range
 
 * Analytical views:
 
-  * Profit by Sport
-  * Profit by Sportsbook
-  * Profit by Tag
-  * ROI by Sport
-  * ROI by Sportsbook
+  * Profit over time by Sportsbook
   * Bankroll evolution over time
+  * Drawdown over time
+  * Total Risk vs Return (cumulative ROI vs. rolling volatility)
+  * Performance breakdown.
+
+* Full entry management: add, edit, and delete records directly from the dashboard
 
 ---
 
 ## Project Structure
 ```
-betting-data-platform/
+performance-analytics-platform/
 │
 ├── data/
 │   └── bets.csv
@@ -65,11 +68,12 @@ betting-data-platform/
 ├── sql/
 │   └── metrics.sql
 │
-├── dashboard/
-│   └── app.py
+├── pages/
+│   ├── 1_Bet_Management.py
+│   └── 2_Analytics.py
 │
+├── app.py
 ├── load_bets.py
-├── requirements.txt
 └── README.md
 ```
 
@@ -80,23 +84,19 @@ betting-data-platform/
 ### 1. Clone the repository
 
 ```
-git clone <your-repo-url>
-cd betting-data-platform
+git clone https://github.com/lucca-libanori/performance-analytics-platform.git
+cd performance-analytics-platform
 ```
 
 ### 2. Install dependencies
 
 ```
-pip install -r requirements.txt
+pip install streamlit pandas numpy plotly sqlalchemy psycopg2-binary python-dotenv
 ```
 
 ### 3. Set up PostgreSQL
 
-* Create a database named:
-
-```
-betting_analytics
-```
+* Create a database (default name used in this project: `betting_analytics`)
 
 * Run the SQL schema:
 
@@ -104,19 +104,34 @@ betting_analytics
 database/schema.sql
 ```
 
-### 4. Load the data
+### 4. Configure environment variables
+
+Create a `.env` file in the project root with your database credentials:
+
+```
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=betting_analytics
+DB_USER=your_user
+DB_PASSWORD=your_password
+```
+
+### 5. Load the data
 
 ```
 python load_bets.py
 ```
 
-### 5. Run the dashboard
+### 6. Run the dashboard
 
 ```
-before run the dashboard you have to change the "password" in the app.py file.
-streamlit run dashboard/app.py
-if this command doesn't work, try:
-python -m streamlit run dashboard/app.py
+streamlit run app.py
+```
+
+If that command doesn't work, try:
+
+```
+python -m streamlit run app.py
 ```
 
 ---
@@ -125,28 +140,21 @@ python -m streamlit run dashboard/app.py
 
 The dashboard provides:
 
-* Total number of bets
+* Total number of entries
 * Total profit
 * ROI (%)
 * Hit rate (%)
 * Total stake
+* Max Drawdown and Drawdown Duration
 
 It also includes breakdowns by:
 
-* Sport
-* Sportsbook
-* Tag
+* Sport / Category
+* Sportsbook / Source
 
 And visualizations such as:
 
-* Profit by category
-* ROI comparison
+* Profit over time by category
 * Bankroll evolution over time
-
----
-
-## Future Improvements
-
-* Integration with external APIs for automated data ingestion
-* Closing Line Value (CLV) analysis
-* Perhaps some personal adjustments that fit in my situation.
+* Drawdown over time
+* Risk vs. Return (cumulative ROI and rolling volatility)
