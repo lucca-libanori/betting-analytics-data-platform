@@ -6,3 +6,4 @@ __pycache__/
 data/bets.csv
 data/bets_*.csv
 run_app.bat
+pages/3_Model_Calculator.py
